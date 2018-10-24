@@ -31,7 +31,7 @@ import io.finch.circe._
  *   $ http DELETE :8081/todos
  * }}}
  */
-object Main extends TwitterServer with Endpoint.Module[IO] {
+object TodoMain extends TwitterServer with Endpoint.Module[IO] {
 
   val port: Flag[Int] = flag("port", 8081, "TCP port for HTTP server")
 

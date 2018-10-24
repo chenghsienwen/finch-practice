@@ -4,6 +4,8 @@ version := "0.1"
 
 scalaVersion := "2.12.7"
 
+// The version numbers for Finagle, Twitter, Finch & Catbird *must* work together. See the Finch build.sbt for known good versions.
+lazy val finchVersion = "0.25.0"
 lazy val finagleHawkVersion = "0.2.1"
 lazy val finchSangriaVersion = "0.3.1"
 lazy val rbScalaUtilsVersion = "0.1.1"
@@ -11,11 +13,9 @@ lazy val circeVersion = "0.10.0"
 lazy val catsVersion = "0.9.0"
 lazy val catsEffectVersion = "1.0.0"
 lazy val mouseVersion = "0.9"
-// The version numbers for Finagle, Twitter, Finch & Catbird *must* work together. See the Finch build.sbt for known good versions.
 lazy val finagleVersion = "18.9.0"
 lazy val finagleHttpAuthVersion = "0.1.0"
 lazy val twitterServerVersion = "18.10.0"
-lazy val finchVersion = "0.25.0"
 lazy val sangriaVersion = "1.2.2"
 lazy val sangriaCirceVersion = "1.1.0"
 lazy val featherbedVersion = "0.3.1"
@@ -26,6 +26,9 @@ lazy val fetchVersion = "0.6.2"
 lazy val slf4jVersion = "1.7.25"
 lazy val gattlingVersion = "2.2.5"
 lazy val nrVersion = "3.40.0"
+lazy val scalaCheckVersion = "1.13.5"
+lazy val scalaTestVersion = "3.0.5"
+lazy val disciplineVersion = "0.9.0"
 
 
 resolvers ++= Seq(
@@ -50,7 +53,9 @@ libraryDependencies ++= Seq(
   "com.netaporter" %% "scala-uri" % scalaUriVersion,
   "org.specs2" %% "specs2-core" % specsVersion % "test",
   "org.specs2" %% "specs2-scalacheck" % specsVersion % "test",
-  "org.scalacheck" %% "scalacheck" % "1.13.5" % "test",
-  "org.scalatest" %% "scalatest" % "3.0.5" % "test",
+  "org.scalacheck" %% "scalacheck" % scalaCheckVersion % "test",
+  "org.scalatest" %% "scalatest" % scalaTestVersion % "test",
   "org.typelevel" %% "cats-laws" % catsVersion % "test",
-  "org.typelevel" %% "discipline" % "0.9.0" % "test")
+  "org.typelevel" %% "discipline" % disciplineVersion % "test")
+
+mainClass in Compile := Some("io.finch.todo.TodoMain")

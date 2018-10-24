@@ -12,7 +12,7 @@ import org.scalatest.{FlatSpec, Matchers}
 import org.scalatest.prop.Checkers
 
 class TodoSpec extends FlatSpec with Matchers with Checkers {
-  import Main._
+  import TodoMain._
 
   behavior of "the postTodo endpoint"
 
