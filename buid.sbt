@@ -27,12 +27,12 @@ lazy val versions = new {
   val slf4j           = "1.7.25"
   val gattling        = "2.2.5"
   val nr              = "3.40.0"
+  val mockito         = "1.10.19"
   val scalaCheck      = "1.13.5"
   val scalaTest       = "3.0.5"
   val discipline      = "0.9.0"
   val guice           = "4.2.0"
   val logback         = "1.2.3"
-  val mockito         = "1.10.19"
   val scalatest       = "3.0.5"
   val junitInterface  = "0.11"
   val dockerItScala   = "0.9.6"
@@ -70,6 +70,7 @@ libraryDependencies ++= Seq(
   "com.netaporter"               %% "scala-uri"                   % versions.scalaUri,
   "org.specs2"                   %% "specs2-core"                 % versions.specs % "test",
   "org.specs2"                   %% "specs2-scalacheck"           % versions.specs % "test",
+  "org.mockito"                  % "mockito-all"                  % versions.mockito % "test",
   "org.scalacheck"               %% "scalacheck"                  % versions.scalaCheck % "test",
   "org.scalatest"                %% "scalatest"                   % versions.scalaTest % "test",
   "org.typelevel"                %% "cats-laws"                   % versions.cats % "test",
