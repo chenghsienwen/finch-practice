@@ -1,5 +1,5 @@
 package domain.http
 
-import domain.errors.Result
+import domain.errors.RepoResult
 
-case class DeleteSessionResponse(deletedSessionList: List[String]) extends Result
+case class DeleteSessionResponse(deletedSessionList: List[String]) extends RepoResult

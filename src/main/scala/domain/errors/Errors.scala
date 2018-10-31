@@ -1,14 +1,14 @@
 package domain.errors
 
-trait Result
+trait RepoResult
 
-case class InternalErrors(code: Int, msg: String) extends Result
+case class InternalErrors(code: Int, msg: String) extends RepoResult
 
-case class ContentNotFoundErrors(code: Int, msg: String) extends Result
+case class ContentNotFoundErrors(code: Int, msg: String) extends RepoResult
 
-case class ProcessError(code: Int, msg: String) extends Result
+case class ProcessError(code: Int, msg: String) extends RepoResult
 
-case class AuthError(code: Int, msg: String) extends Result
+case class AuthError(code: Int, msg: String) extends RepoResult
 
 object Errors {
 

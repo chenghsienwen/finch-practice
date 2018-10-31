@@ -21,7 +21,6 @@ lazy val versions = new {
   val sangriaCirce    = "1.1.0"
   val featherbed      = "0.3.1"
   val specs           = "3.9.4"
-  val scalaCache      = "0.9.4"
   val scalaUri        = "0.4.16"
   val fetch           = "0.6.2"
   val slf4j           = "1.7.25"
@@ -43,7 +42,7 @@ lazy val versions = new {
   val catbird         = "18.5.0"
   val scalaErrors     = "1.2"
   val perfolation     = "1.0.2"
-  val cacheRedis      = "0.24.1"
+  val cacheRedis      = "0.26.0"
 }
 
 resolvers ++= Seq(
@@ -86,7 +85,9 @@ libraryDependencies ++= Seq(
   "com.google.inject.extensions" % "guice-testlib"                % versions.guice % "test",
   "com.whisk"                    %% "docker-testkit-scalatest"    % versions.dockerItScala % "test",
   "com.whisk"                    %% "docker-testkit-impl-spotify" % versions.dockerItScala % "test",
-  "com.github.cb372"             %% "scalacache-redis"            % versions.cacheRedis
+  "com.github.cb372"             %% "scalacache-core"             % versions.cacheRedis,
+  "com.github.cb372"             %% "scalacache-redis"            % versions.cacheRedis,
+  "com.github.cb372"             %% "scalacache-cats-effect"      % versions.cacheRedis
 )
 
 mainClass in Compile := Some("PromoteMain")
