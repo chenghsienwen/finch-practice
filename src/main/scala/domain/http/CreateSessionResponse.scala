@@ -1,5 +1,5 @@
 package domain.http
 
-import domain.errors.RepoResult
+trait CreateSessionResult
 
-case class CreateSessionResponse(sessionId: String) extends RepoResult
+final case class CreateSessionResponse(sessionId: String) extends CreateSessionResult

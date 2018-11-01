@@ -1,10 +1,10 @@
 import cats.effect.IO
 import cats.syntax.option._
 import com.twitter.util.logging.Logging
-import domain.db.{Round, VendingMachine}
-import domain.errors.{Errors, RepoResult}
+import domain.db._
+import domain.errors.Errors._
 import domain.http._
-import domain.{SessionId, TTL}
+import domain.{ClientId, SessionId, TTL}
 import modules.RedisCacheModule
 import scalacache.modes.scalaFuture._
 import util.EnvUtils._
@@ -14,16 +14,19 @@ import util.{IdUtils, TimestampUtils}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
+trait RepoResult
+
 final case class CreateSessionCacheRequest(ttl: Long, clientIdOpt: Option[String])
 final case class deleteSessionResult(v: String) extends RepoResult
 final case class deleteVendingResult() extends RepoResult
 
-class promoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Logging{
+class PromoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Logging{
   val redisVendingCache = RedisCacheModule.redisVendingCache
   val redisSessionCache = RedisCacheModule.redisSessionCache
   val sessionTTLSecs = env[Int](REDIS_TTL_SECONDS_ENV).getOrElse(30 * 86400)
+  val adminAccountIds = env[Array[String]](ADMIN_ACCOUNT_ID_WHITELIST_ENV).getOrElse(Array.empty[String])
 
-  def insertVending: (CreateVendingRequest) => IO[RepoResult] = { request =>
+  def insertVending: (CreateVendingRequest) => IO[CreateVendingResult] = { request =>
     val result = redisVendingCache
       .get(VENDING_IDS)
       .map {
@@ -33,17 +36,17 @@ class promoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Log
       .map { ids =>
         val result = VendingMachine(ids, timestampUtils.currentTimestamp())
         redisVendingCache.put(VENDING_IDS)(result)
-        ids |> CreateVendingResponse
+        ids |> CreateVendingSucceed
       }
       .recover {
         case t =>
           error("Insert vendingIds Fail", t)
-          Errors.CreateVendingInternalError
+          throw CreateVendingInternalError
       }
     result |> (IO(_)) |> IO.fromFuture
   }
 
-  def insertSession: (CreateSessionCacheRequest) => IO[RepoResult] = { request =>
+  def insertSession: (CreateSessionCacheRequest) => IO[Round] = { request =>
     val round = Round(
       _id = idUtils.generateSessionId(),
       clientId = request.clientIdOpt,
@@ -54,7 +57,7 @@ class promoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Log
     round |> (IO(_))
   }
 
-  def updateSession: (Round, Round, Option[TTL]) => IO[RepoResult] = { (round, req, ttl) =>
+  def updateSession: (Round, Round, Option[TTL]) => IO[UpdateSessionResponse] = { (round, req, ttl) =>
     val updateRound = round.copy(
       clientId = round.clientId.orElse(req.clientId),
       status = req.status.orElse(round.status),
@@ -66,22 +69,41 @@ class promoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Log
       ttl.map(t => Math.max(t.v - ((timestampUtils.currentTimestamp() - round.createTime) / 1000), 1).seconds)
 
     redisSessionCache.put(round._id)(updateRound, ttl = expire.#!("ttl =>"))
-    updateRound |> (IO(_))
+    updateRound |> UpdateSessionResponse |> (IO(_))
   }
 
-  def getSession: (SessionId) => IO[RepoResult] = { request =>
+  def getSession: (SessionId) => IO[dbResult] = { request =>
     redisSessionCache
       .get(request.v)
       .map {
         case Some(r) => r
-        case None    => Errors.SessionNotFound
+        case None    => RoundNotFound()
       }
       .recover {
         case t =>
           error("Get session Fail", t)
-          Errors.GetSessionIdInternalError
+          RoundInternalError()
       } |> (IO(_)) |> IO.fromFuture
   }
+
+  def getVending: () => IO[VendingMachine] = { () =>
+    redisVendingCache
+      .get(VENDING_IDS)
+      .map(i => i.getOrElse(VendingMachine(List.empty[String], 0L)))
+      .recover {
+        case t =>
+          error("Get vendingIds Fail", t)
+          throw GetVendingIdInternalError
+      } |> (IO(_)) |> IO.fromFuture
+  }
+
+
+  def isVendingOrAdmin(id: ClientId): IO[Boolean] =
+    for {
+      list <- getVending()
+    } yield {
+      list.vendingIdList.contains(id.v) | adminAccountIds.contains(id.v)
+    }
 
   def deleteSession: (SessionId) => IO[RepoResult] = { request =>
     redisSessionCache.remove(request.v)

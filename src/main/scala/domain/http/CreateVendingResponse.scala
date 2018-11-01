@@ -1,5 +1,11 @@
 package domain.http
 
-import domain.errors.RepoResult
+sealed trait CreateVendingResult
 
-case class CreateVendingResponse(vendingIds: List[String]) extends RepoResult
+final case class CreateVendingSucceed(vendingIds: List[String]) extends CreateVendingResult
+
+final case class CreateVendingAllow() extends CreateVendingResult
+
+final case class CreateVendingNotAllow() extends CreateVendingResult
+
+final case class CreateVendingNotFound() extends CreateVendingResult

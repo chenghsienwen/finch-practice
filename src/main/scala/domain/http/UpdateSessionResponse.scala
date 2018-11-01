@@ -1,6 +1,11 @@
 package domain.http
 
 import domain.db.Round
-import domain.errors.RepoResult
 
-case class UpdateSessionResponse(session: Round) extends RepoResult
+trait UpdateSessionResult
+
+final case class UpdateSessionResponse(session: Round) extends UpdateSessionResult
+
+final case class UpdateSessionAllow() extends UpdateSessionResult
+
+final case class UpdateSessionNotAllow() extends UpdateSessionResult

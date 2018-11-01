@@ -1,14 +1,12 @@
 package domain.errors
 
-trait RepoResult
+case class InternalErrors(code: Int, msg: String) extends Exception
 
-case class InternalErrors(code: Int, msg: String) extends RepoResult
+case class ContentNotFoundErrors(code: Int, msg: String) extends Exception
 
-case class ContentNotFoundErrors(code: Int, msg: String) extends RepoResult
+case class ProcessError(code: Int, msg: String) extends Exception
 
-case class ProcessError(code: Int, msg: String) extends RepoResult
-
-case class AuthError(code: Int, msg: String) extends RepoResult
+case class AuthError(code: Int, msg: String) extends Exception
 
 object Errors {
 
@@ -21,6 +19,8 @@ object Errors {
   val GetConfigInternalError            = InternalErrors(code = 1009, msg = "Server Internal Error")
   val InsertPrivacyTermInternalError    = InternalErrors(code = 1010, msg = "Server Internal Error")
   val DeletePrivacyTermInternalError    = InternalErrors(code = 1011, msg = "Server Internal Error")
+  val CreateSessionInternalError        = InternalErrors(code = 1012, msg = "Server Internal Error")
+  val UpdateSessionInternalError        = InternalErrors(code = 1013, msg = "Server Internal Error")
 
   val S3ObjectNotFoundError = ContentNotFoundErrors(code = 9007, msg = "S3 Object Not Found Error")
   val DeleteSessionNotFound = ContentNotFoundErrors(9009, "delete session Not Found")
