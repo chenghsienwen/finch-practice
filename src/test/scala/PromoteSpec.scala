@@ -18,12 +18,15 @@ import org.mockito.Matchers.any
 import org.mockito.Mockito.when
 import org.scalatest.mockito.MockitoSugar
 import util.EnvUtils._
-import util.{GameStatus, IdUtils}
+import util.{GameStatus, IdUtils, TimestampUtils}
 import cats.syntax.option._
+import domain.SessionId
 import util.PipeOperator.Pipe
+import shapeless.syntax.typeable._
 class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar with TestKit {
-  private[this] val ADMIN_ACCOUNT_ID = env[Array[String]]("ADMIN_ACCOUNT_ID_WHITELIST").get.head
-  private[this] val VENDING_ID_LIST  = (0 until 3).map(_ => generateAccountId()).toList
+  private[this] val ADMIN_ACCOUNT_ID     = env[Array[String]]("ADMIN_ACCOUNT_ID_WHITELIST").get.head
+  private[this] val sessionTTLSecs       = env[Long](REDIS_TTL_SECONDS_ENV).getOrElse(30 * 86400L)
+  private[this] val VENDING_ID_LIST      = (0 until 3).map(_ => generateAccountId()).toList
   private[this] val SESSION_ID_LIST      = (0 until 3).map(_ => generateSessionId()).toList
   private[this] val PHONE_ID             = generateAccountId()
   private[this] val PHONE_ID_OTHER       = generateAccountId()
@@ -32,36 +35,13 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   private[this] val APP_TIMESTAMP        = System.currentTimeMillis()
   private[this] val SESSION_HANDSET_ITEM = "testItem"
   private[this] val SESSION_IAMGE_URL    = "http://test.download.image"
+
   behavior of "the promote endpoint"
 
-  case class TodoWithoutId(title: String, completed: Boolean, order: Int)
-  val mockIdUtils = mock[IdUtils]
+  val mockIdUtils             = mock[IdUtils]
+  val mockTimeUtils           = mock[TimestampUtils]
+  private val mockPromoteRepo = new PromoteRepo(mockIdUtils, mockTimeUtils)
 
-  def genTodoWithoutId: Gen[TodoWithoutId] =
-    for {
-      t <- Gen.alphaStr
-      c <- Gen.oneOf(true, false)
-      o <- Gen.choose(Int.MinValue, Int.MaxValue)
-    } yield TodoWithoutId(t, c, o)
-
-  implicit def arbitraryTodoWithoutId: Arbitrary[TodoWithoutId] = Arbitrary(genTodoWithoutId)
-
-  it should "create a todo" in {
-    check { todoWithoutId: TodoWithoutId =>
-      val input = Input
-        .post("/todos")
-        .withBody[Application.Json](todoWithoutId, Some(StandardCharsets.UTF_8))
-
-      val res        = postTodo(input)
-      val Some(todo) = res.awaitOutputUnsafe()
-
-      todo.status === Status.Created &&
-      todo.value.completed === todoWithoutId.completed &&
-      todo.value.title === todoWithoutId.title &&
-      todo.value.order === todoWithoutId.order &&
-      Todo.get(todo.value.id).isDefined
-    }
-  }
   def genVendingId: Gen[CreateVendingRequest] =
     for {
       id <- Gen.uuid
@@ -74,36 +54,42 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   implicit def arbitrarySession: Arbitrary[Round] = Arbitrary(genSession)
 
   it should "create a vending id list" in {
-    check { req: CreateVendingRequest =>
-      val input = Input
-        .post("/api/mwc_promote/v1/admin/game/register_vending")
-        .withHeaders(("X-HTC-Account-Id", ADMIN_ACCOUNT_ID))
-        .withBody[Application.Json](req, Some(StandardCharsets.UTF_8))
-      val res            = createVending(input)
-      val Some(response) = res.awaitOutputUnsafe()
+    val req = CreateVendingRequest(VENDING_ID_LIST)
+    val input = Input
+      .post("/api/mwc_promote/v1/admin/game/register_vending")
+      .withHeaders(("X-HTC-Account-Id", ADMIN_ACCOUNT_ID))
+      .withBody[Application.Json](req, Some(StandardCharsets.UTF_8))
+    val res            = createVending(input)
+    val Some(response) = res.awaitOutputUnsafe()
 
-      response.status === Status.Ok &&
-      response.value.vendingIds === req.vendingIds
-    }
+    response.status === Status.Ok &&
+    response.value.vendingIds === req.vendingIds
+
+    removeVending()
+
   }
 
   behavior of "create session endpoint"
 
   it should "create session succeed" in {
     when(mockIdUtils.generateSessionId()).thenReturn(SESSION_ID_LIST.head)
-    val request = CreateSessionRequest(createVendingAction().head)
+    createVendingAction(VENDING_ID_LIST)
+    val request = CreateSessionRequest(VENDING_ID_LIST.head)
     val input =
       Input.post("/api/mwc_promote/v1/game/create").withBody[Application.Json](request, Some(StandardCharsets.UTF_8))
-    createVending(input).awaitOutputUnsafe() shouldBe Some(SESSION_ID_LIST.head)
+    createSession(input).awaitOutputUnsafe() shouldBe Some(SESSION_ID_LIST.head)
     removeVending()
+    removeSession(SESSION_ID_LIST.head)
   }
 
   behavior of "the patchSession endpoint"
 
   it should "update session succeed" in {
-    createSessionAction()
+    createVendingAction(VENDING_ID_LIST)
+    createSessionAction(clientId = VENDING_ID_LIST.head, sessionId = SESSION_ID_LIST.head)
 
-    val request = UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
+    val request =
+      UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
     val response = Round(
       _id = SESSION_ID_LIST.head,
       clientId = PHONE_ID.some,
@@ -114,59 +100,46 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
       updateTime = APP_TIMESTAMP
     ) |> UpdateSessionResponse
     val input =
-      Input.patch(s"/api/mwc_promote/v1/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}").withBody[Application.Json](request, Some(StandardCharsets.UTF_8))
+      Input
+        .patch(s"/api/mwc_promote/v1/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}")
+        .withBody[Application.Json](request, Some(StandardCharsets.UTF_8))
     updateSession(input).awaitOutputUnsafe() shouldBe Some(response)
     removeVending()
-    removeSession()
+    removeSession(SESSION_ID_LIST.head)
   }
 
   behavior of "get session endpoint"
 
   it should "get session succeed" in {
-    createVendingAction()
-    createSessionAction()
+    createVendingAction(VENDING_ID_LIST)
+    createSessionAction(clientId = VENDING_ID_LIST.head, sessionId = SESSION_ID_LIST.head)
 
-    val request = UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
+    val request =
+      UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
     val response = Round(_id = SESSION_ID_LIST.head, createTime = APP_TIMESTAMP, updateTime = APP_TIMESTAMP) |> GetSessionResponse
     val input =
       Input.get(s"/api/mwc_promote/v1/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}")
     getSession(input).awaitOutputUnsafe() shouldBe Some(response)
     removeVending()
-    removeSession()
+    removeSession(SESSION_ID_LIST.head)
   }
 
-  behavior of "delete session endpoint"
-
-  it should "delete session succeed by admin" in {
-    createVendingAction()
-    createSessionAction()
-
-    val response   = DeleteSessionResponse(List(SESSION_ID_LIST.head))
-    val input =
-      Input.delete(s"/api/mwc_promote/v1/admin/game/delete?sessionId=${SESSION_ID_LIST.head}").withHeaders(("X-HTC-Account-Id", ADMIN_ACCOUNT_ID))
-    deleteSession(input).awaitOutputUnsafe() shouldBe Some(response)
-    removeVending()
-  }
-
-  private def createTodo(): Todo = {
-    val todo = Todo(UUID.randomUUID(), "foo", completed = false, 0)
-    Todo.save(todo)
-    todo
-  }
-
-  private def createVendingAction(): List[String] =
+  private def createVendingAction(req: List[String]): Unit = {
     //insert vneidng id
-    VENDING_ID_LIST
-  private def createSessionAction(): String = {
-    when(mockIdUtils.generateSessionId()).thenReturn(SESSION_ID_LIST.head)
-    SESSION_ID_LIST.head
-  }
-  def removeVending(): Unit = {
-
+    val result = mockPromoteRepo.insertVending(req |> CreateVendingRequest).unsafeRunSync()
+    result.isInstanceOf[CreateVendingSucceed] shouldBe true
+    result.cast[CreateVendingSucceed].get.vendingIds shouldBe req
   }
 
-  def removeSession(): Unit = {
-
+  private def createSessionAction(clientId: String, sessionId: String): Unit = {
+    when(mockIdUtils.generateSessionId()).thenReturn(sessionId)
+    val result = mockPromoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, clientId.some)).unsafeRunSync()
+    result._id shouldBe sessionId
   }
+  def removeVending(): Unit =
+    mockPromoteRepo.deleteVending().unsafeRunSync()
+
+  def removeSession(id: String): Unit =
+    mockPromoteRepo.deleteSession(id |> SessionId)
 
 }

@@ -23,7 +23,6 @@ final case class deleteVendingResult() extends RepoResult
 class PromoteRepo (idUtils: IdUtils, timestampUtils: TimestampUtils) extends Logging{
   val redisVendingCache = RedisCacheModule.redisVendingCache
   val redisSessionCache = RedisCacheModule.redisSessionCache
-  val sessionTTLSecs = env[Int](REDIS_TTL_SECONDS_ENV).getOrElse(30 * 86400)
   val adminAccountIds = env[Array[String]](ADMIN_ACCOUNT_ID_WHITELIST_ENV).getOrElse(Array.empty[String])
 
   def insertVending: (CreateVendingRequest) => IO[CreateVendingResult] = { request =>

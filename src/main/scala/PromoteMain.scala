@@ -13,7 +13,7 @@ import domain.http.CreateVendingRequest
 import io.circe.generic.auto._
 import io.finch._
 import io.finch.circe._
-import io.finch.todo.TodoMain.{adminHttpServer, statsReceiver}
+import io.finch.todo.TodoMain.{adminHttpServer, jsonBody, port, post, statsReceiver, todos}
 import util.EnvUtils._
 import util.AppConfigLib.getConfig
 import domain.http._
@@ -23,6 +23,8 @@ import util.TimestampUtils
 import domain.errors.Errors._
 import domain.errors._
 import cats.syntax.option._
+import io.finch.todo.Todo
+import shapeless._
 import shapeless.syntax.typeable._
 
 /**
@@ -33,7 +35,7 @@ import shapeless.syntax.typeable._
   */
 object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
 
-  val port = flag("port", getConfig[String]("FINCH_HTTP_PORT").fold(":8888")(x => s":$x"), "TCP port for HTTP server")
+  val port = flag("port", getConfig[String]("FINCH_HTTP_PORT").fold("8888")(x => s"$x"), "TCP port for HTTP server")
 
   val adminAccountIds     = env[Array[String]](ADMIN_ACCOUNT_ID_WHITELIST_ENV).getOrElse(Array.empty[String])
   val sessionTTLSecs      = env[Long](REDIS_TTL_SECONDS_ENV).getOrElse(30 * 86400L)
@@ -53,7 +55,9 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
 
   def createVending: Endpoint[IO, CreateVendingSucceed] =
     post(
-      "/api/mwc_promote/v1/admin/game/register_vending" :: header("X-HTC-Account-Id") :: jsonBody[CreateVendingRequest]
+      "api" :: "mwc_promote" :: "v1" :: "admin" :: "game" :: "register_vending" :: header("X-HTC-Account-Id") :: jsonBody[
+        CreateVendingRequest
+      ]
     ) { (header: String, req: CreateVendingRequest) =>
       (for {
         isAllow <- CheckRole(header |> ClientId)
@@ -69,17 +73,18 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
     }
 
   def createSession: Endpoint[IO, CreateSessionResponse] =
-    post("/api/mwc_promote/v1/game/create" :: jsonBody[CreateSessionRequest]) { (req: CreateSessionRequest) =>
-      (for {
-        isAllow <- promoteRepo.isVendingOrAdmin(req.clientId |> ClientId)
-        res     <- promoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, req.clientId.some))
-      } yield {
-        (isAllow, res)
-      }).map {
-        case (a: Boolean, r: Round) if a == true => Ok(r._id |> CreateSessionResponse)
-        case (a: Boolean, _) if a == false       => Unauthorized(ClientIdNotAllowed)
-        case (_, _)                              => InternalServerError(CreateSessionInternalError)
-      }
+    post("api" :: "mwc_promote" :: "v1" :: "game" :: "create" :: jsonBody[CreateSessionRequest]) {
+      (req: CreateSessionRequest) =>
+        (for {
+          isAllow <- promoteRepo.isVendingOrAdmin(req.clientId |> ClientId)
+          res     <- promoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, req.clientId.some))
+        } yield {
+          (isAllow, res)
+        }).map {
+          case (a: Boolean, r: Round) if a == true => Ok(r._id |> CreateSessionResponse)
+          case (a: Boolean, _) if a == false       => Unauthorized(ClientIdNotAllowed)
+          case (_, _)                              => InternalServerError(CreateSessionInternalError)
+        }
     }
 
   val provideRound: (SessionId, Option[ClientId], UpdateSessionRequest) => Round = { (sessionId, clientId, req) =>
@@ -112,14 +117,14 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
 
   def updateSession: Endpoint[IO, UpdateSessionResponse] =
     patch(
-      "/api/mwc_promote/v1/game/" :: path[String]
+      "api" :: "mwc_promote" :: "v1" :: "game" :: path[String]
         .withToString("sessionId") :: param[String]("clientId") :: jsonBody[UpdateSessionRequest]
     ) { (sessionId: String, clientId: String, body: UpdateSessionRequest) =>
       (for {
         sessionResult <- promoteRepo.getSession(sessionId |> SessionId)
         isAllow       <- validateUpdateSession(sessionResult.cast[Round].getOrElse(Round()), clientId |> ClientId)
         res <- promoteRepo.updateSession(
-          sessionResult.cast[Round].getOrElse(Round()),
+                sessionResult.cast[Round].getOrElse(Round()),
                 provideRound(sessionId |> SessionId, Some(clientId |> ClientId), body),
                 Some(sessionTTLSecs |> TTL)
               )
@@ -138,7 +143,7 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
   val getSessionImpl: (SessionId, ClientId) => IO[(dbResult, GetSessionResult)] = { (sessionId, clientId) =>
     for {
       session <- promoteRepo.getSession(sessionId)
-      isAllow       <- validateGetSession(session.cast[Round].getOrElse(Round()), clientId)
+      isAllow <- validateGetSession(session.cast[Round].getOrElse(Round()), clientId)
     } yield {
       (session, isAllow)
     }
@@ -151,32 +156,26 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
     promoteRepo.isVendingOrAdmin(reqClientId).map {
       case true => GetSessionAllow()
       case false =>
-      session.clientId.map(i => i.equalsIgnoreCase(reqClientId.v)) match {
-        case Some(true)  => GetSessionAllow()
-        case Some(false) => GetSessionNotAllow()
-        case None        => GetSessionNotFound()
-      }
+        session.clientId.map(i => i.equalsIgnoreCase(reqClientId.v)) match {
+          case Some(true)  => GetSessionAllow()
+          case Some(false) => GetSessionNotAllow()
+          case None        => GetSessionNotFound()
+        }
     }
   }
 
   def getSession: Endpoint[IO, GetSessionResponse] =
-    get("/api/mwc_promote/v1/game/" :: path[String].withToString("sessionId") :: param[String]("clientId")) {
+    get("api" :: "mwc_promote" :: "v1" :: "game" :: path[String].withToString("sessionId") :: param[String]("clientId")) {
       (sessionId: String, clientId: String) =>
-        getSessionImpl(sessionId |> SessionId, clientId |> ClientId).map{
-          case (i: Round, r: GetSessionAllow) => Ok(i |> GetSessionResponse)
+        getSessionImpl(sessionId |> SessionId, clientId |> ClientId).map {
+          case (i: Round, r: GetSessionAllow)    => Ok(i |> GetSessionResponse)
           case (i: Round, r: GetSessionNotAllow) => Unauthorized(ClientIdNotAllowed)
-          case (i: RoundNotFound, _) => BadRequest(AccountIdNotFound)
+          case (i: RoundNotFound, _)             => BadRequest(AccountIdNotFound)
         }
     }
 
-  def deleteSession: Endpoint[IO, DeleteSessionResponse] =
-    delete("/api/mwc_promote/v1/admin/game/delete" :: header("X-HTC-Account-Id") :: params[String]("sessionId")) {
-      (header: String, sessionIds: Seq[String]) =>
-        Ok(sessionIds.toList |> DeleteSessionResponse)
-    }
-
   val api: Service[Request, Response] = (
-    createVending :+: createSession :+: updateSession :+: getSession :+: deleteSession
+    createVending :+: createSession :+: updateSession :+: getSession
   ).handle({
       case e: Exception => InternalServerError(e)
     })
@@ -184,10 +183,11 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
 
   def main(): Unit = {
     println("Serving the promote API") //scalastyle:ignore
-
+    println(s"port ${port()}")
+    println(s"api status ${api.status}")
     val server = Http.server
       .withStatsReceiver(statsReceiver)
-      .serve(port(), api)
+      .serve(s":${port()}", api)
 
     onExit { server.close() }
 
