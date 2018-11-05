@@ -23,7 +23,15 @@ import cats.syntax.option._
 import domain.SessionId
 import util.PipeOperator.Pipe
 import shapeless.syntax.typeable._
-class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar with TestKit {
+import docker.DockerRedisService
+import FutureUtils._
+/**
+  * sbt "testOnly PromoteSpec"
+  * sbt 'testOnly PromoteSpec -- -z "be ready with log line checker"'
+  */
+class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar with TestKit with DockerRedisService {
+  startAllOrFail()
+  Thread.sleep(2500)
   private[this] val ADMIN_ACCOUNT_ID     = env[Array[String]]("ADMIN_ACCOUNT_ID_WHITELIST").get.head
   private[this] val sessionTTLSecs       = env[Long](REDIS_TTL_SECONDS_ENV).getOrElse(30 * 86400L)
   private[this] val VENDING_ID_LIST      = (0 until 3).map(_ => generateAccountId()).toList
@@ -35,6 +43,12 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   private[this] val APP_TIMESTAMP        = System.currentTimeMillis()
   private[this] val SESSION_HANDSET_ITEM = "testItem"
   private[this] val SESSION_IAMGE_URL    = "http://test.download.image"
+
+  behavior of "mongodb node"
+  it should "be ready with log line checker" in {
+    isContainerReady(redisContainer).toFutureValue shouldBe true
+    removeVending()
+  }
 
   behavior of "the promote endpoint"
 
@@ -59,7 +73,7 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
       .post("/api/mwc_promote/v1/admin/game/register_vending")
       .withHeaders(("X-HTC-Account-Id", ADMIN_ACCOUNT_ID))
       .withBody[Application.Json](req, Some(StandardCharsets.UTF_8))
-    val res            = createVending(input)
+    val res            = createVending(mockPromoteRepo)(input)
     val Some(response) = res.awaitOutputUnsafe()
 
     response.status === Status.Ok &&
@@ -77,7 +91,7 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
     val request = CreateSessionRequest(VENDING_ID_LIST.head)
     val input =
       Input.post("/api/mwc_promote/v1/game/create").withBody[Application.Json](request, Some(StandardCharsets.UTF_8))
-    createSession(input).awaitOutputUnsafe() shouldBe Some(SESSION_ID_LIST.head)
+    createSession(mockPromoteRepo)(input).awaitOutputUnsafe().get.value.sessionId shouldBe SESSION_ID_LIST.head
     removeVending()
     removeSession(SESSION_ID_LIST.head)
   }
@@ -85,25 +99,26 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   behavior of "the patchSession endpoint"
 
   it should "update session succeed" in {
+    when(mockTimeUtils.currentTimestamp()).thenReturn(APP_TIMESTAMP)
     createVendingAction(VENDING_ID_LIST)
-    createSessionAction(clientId = VENDING_ID_LIST.head, sessionId = SESSION_ID_LIST.head)
+    createSessionAction(sessionId = SESSION_ID_LIST.head)
 
     val request =
       UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
     val response = Round(
       _id = SESSION_ID_LIST.head,
       clientId = PHONE_ID.some,
-      status = GameStatus.HANDSET_READY.some,
-      handsetItem = None,
-      imageUrl = None,
+      status = None,
+      handsetItem = SESSION_HANDSET_ITEM.some,
+      imageUrl = SESSION_IAMGE_URL.some,
       createTime = APP_TIMESTAMP,
       updateTime = APP_TIMESTAMP
     ) |> UpdateSessionResponse
     val input =
       Input
-        .patch(s"/api/mwc_promote/v1/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}")
+        .patch(s"/api/mwc_promote/v1/game/${SESSION_ID_LIST.head}?clientId=${PHONE_ID}")
         .withBody[Application.Json](request, Some(StandardCharsets.UTF_8))
-    updateSession(input).awaitOutputUnsafe() shouldBe Some(response)
+    updateSession(mockPromoteRepo)(input).awaitOutputUnsafe().get.value shouldBe response
     removeVending()
     removeSession(SESSION_ID_LIST.head)
   }
@@ -111,15 +126,14 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   behavior of "get session endpoint"
 
   it should "get session succeed" in {
+    when(mockTimeUtils.currentTimestamp()).thenReturn(APP_TIMESTAMP)
     createVendingAction(VENDING_ID_LIST)
-    createSessionAction(clientId = VENDING_ID_LIST.head, sessionId = SESSION_ID_LIST.head)
+    createSessionAction(sessionId = SESSION_ID_LIST.head)
 
-    val request =
-      UpdateSessionRequest(status = None, handsetItem = SESSION_HANDSET_ITEM.some, imageUrl = SESSION_IAMGE_URL.some)
-    val response = Round(_id = SESSION_ID_LIST.head, createTime = APP_TIMESTAMP, updateTime = APP_TIMESTAMP) |> GetSessionResponse
+    val response = Round(_id = SESSION_ID_LIST.head, clientId = None, createTime = APP_TIMESTAMP, updateTime = APP_TIMESTAMP) |> GetSessionResponse
     val input =
-      Input.get(s"/api/mwc_promote/v1/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}")
-    getSession(input).awaitOutputUnsafe() shouldBe Some(response)
+      Input.get(s"/api/mwc_promote/v1/game/${SESSION_ID_LIST.head}?clientId=${VENDING_ID_LIST.head}")
+    getSession(mockPromoteRepo)(input).awaitOutputUnsafe().get.value shouldBe response
     removeVending()
     removeSession(SESSION_ID_LIST.head)
   }
@@ -131,10 +145,11 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
     result.cast[CreateVendingSucceed].get.vendingIds shouldBe req
   }
 
-  private def createSessionAction(clientId: String, sessionId: String): Unit = {
+  private def createSessionAction(sessionId: String): Unit = {
     when(mockIdUtils.generateSessionId()).thenReturn(sessionId)
-    val result = mockPromoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, clientId.some)).unsafeRunSync()
+    val result = mockPromoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, None)).unsafeRunSync()
     result._id shouldBe sessionId
+    result.clientId shouldBe None
   }
   def removeVending(): Unit =
     mockPromoteRepo.deleteVending().unsafeRunSync()

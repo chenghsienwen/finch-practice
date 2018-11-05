@@ -53,7 +53,7 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
       }
     }) |> (IO(_))
 
-  def createVending: Endpoint[IO, CreateVendingSucceed] =
+  def createVending(promoteRepo: PromoteRepo): Endpoint[IO, CreateVendingSucceed] =
     post(
       "api" :: "mwc_promote" :: "v1" :: "admin" :: "game" :: "register_vending" :: header("X-HTC-Account-Id") :: jsonBody[
         CreateVendingRequest
@@ -72,12 +72,12 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
       }
     }
 
-  def createSession: Endpoint[IO, CreateSessionResponse] =
+  def createSession(promoteRepo: PromoteRepo): Endpoint[IO, CreateSessionResponse] =
     post("api" :: "mwc_promote" :: "v1" :: "game" :: "create" :: jsonBody[CreateSessionRequest]) {
       (req: CreateSessionRequest) =>
         (for {
           isAllow <- promoteRepo.isVendingOrAdmin(req.clientId |> ClientId)
-          res     <- promoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, req.clientId.some))
+          res     <- promoteRepo.insertSession(CreateSessionCacheRequest(sessionTTLSecs, None))
         } yield {
           (isAllow, res)
         }).map {
@@ -111,11 +111,10 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
           case Some(false) => UpdateSessionNotAllow()
           case None        => UpdateSessionAllow()
         }
-
     }
   }
 
-  def updateSession: Endpoint[IO, UpdateSessionResponse] =
+  def updateSession(promoteRepo: PromoteRepo): Endpoint[IO, UpdateSessionResponse] =
     patch(
       "api" :: "mwc_promote" :: "v1" :: "game" :: path[String]
         .withToString("sessionId") :: param[String]("clientId") :: jsonBody[UpdateSessionRequest]
@@ -136,8 +135,6 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
         case (item: RoundNotFound, _, _)                                    => BadRequest(AccountIdNotFound)
         case (_, _, _)                                                      => InternalServerError(UpdateSessionInternalError)
       }
-
-      Ok(Round() |> UpdateSessionResponse)
     }
 
   val getSessionImpl: (SessionId, ClientId) => IO[(dbResult, GetSessionResult)] = { (sessionId, clientId) =>
@@ -164,7 +161,7 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
     }
   }
 
-  def getSession: Endpoint[IO, GetSessionResponse] =
+  def getSession(promoteRepo: PromoteRepo): Endpoint[IO, GetSessionResponse] =
     get("api" :: "mwc_promote" :: "v1" :: "game" :: path[String].withToString("sessionId") :: param[String]("clientId")) {
       (sessionId: String, clientId: String) =>
         getSessionImpl(sessionId |> SessionId, clientId |> ClientId).map {
@@ -175,7 +172,7 @@ object PromoteMain extends TwitterServer with Endpoint.Module[IO] {
     }
 
   val api: Service[Request, Response] = (
-    createVending :+: createSession :+: updateSession :+: getSession
+    createVending(promoteRepo) :+: createSession(promoteRepo) :+: updateSession(promoteRepo) :+: getSession(promoteRepo)
   ).handle({
       case e: Exception => InternalServerError(e)
     })
