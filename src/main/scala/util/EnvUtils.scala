@@ -1,7 +1,8 @@
 package util
 
 import scala.util.control.Exception._
-
+//import ciris.{env}
+import cats.syntax.option._
 object EnvUtils {
 
   implicit val optionLongConverter  = new LongConverter()

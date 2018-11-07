@@ -6,6 +6,7 @@ import domain.errors.Errors._
 import domain.http._
 import domain.{ClientId, SessionId, TTL}
 import modules.RedisCacheModule
+//import scalacache.CatsEffect.modes._
 import scalacache.modes.scalaFuture._
 import util.EnvUtils._
 import util.PipeOperator._

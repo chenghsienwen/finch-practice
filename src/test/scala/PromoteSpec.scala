@@ -27,7 +27,7 @@ import docker.DockerRedisService
 import FutureUtils._
 /**
   * sbt "testOnly PromoteSpec"
-  * sbt 'testOnly PromoteSpec -- -z "be ready with log line checker"'
+  * sbt 'testOnly PromoteSpec -- -z "be ready with container"'
   */
 class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar with TestKit with DockerRedisService {
   startAllOrFail()
@@ -45,7 +45,7 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   private[this] val SESSION_IAMGE_URL    = "http://test.download.image"
 
   behavior of "mongodb node"
-  it should "be ready with log line checker" in {
+  it should "be ready with container" in {
     isContainerReady(redisContainer).toFutureValue shouldBe true
     removeVending()
   }
@@ -55,17 +55,6 @@ class PromoteSpec extends FlatSpec with Matchers with Checkers with MockitoSugar
   val mockIdUtils             = mock[IdUtils]
   val mockTimeUtils           = mock[TimestampUtils]
   private val mockPromoteRepo = new PromoteRepo(mockIdUtils, mockTimeUtils)
-
-  def genVendingId: Gen[CreateVendingRequest] =
-    for {
-      id <- Gen.uuid
-    } yield CreateVendingRequest(List(id.toString))
-  implicit def arbitraryVendingId: Arbitrary[CreateVendingRequest] = Arbitrary(genVendingId)
-  def genSession: Gen[Round] =
-    for {
-      id <- Gen.uuid
-    } yield Round(_id = id.toString)
-  implicit def arbitrarySession: Arbitrary[Round] = Arbitrary(genSession)
 
   it should "create a vending id list" in {
     val req = CreateVendingRequest(VENDING_ID_LIST)

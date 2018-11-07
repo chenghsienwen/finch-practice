@@ -43,6 +43,7 @@ lazy val versions = new {
   val scalaErrors     = "1.2"
   val perfolation     = "1.0.2"
   val cacheRedis      = "0.26.0"
+  val ciris = "0.11.0"
 }
 
 resolvers ++= Seq(
@@ -89,5 +90,16 @@ libraryDependencies ++= Seq(
   "com.github.cb372"             %% "scalacache-redis"            % versions.cacheRedis,
   "com.github.cb372"             %% "scalacache-cats-effect"      % versions.cacheRedis
 )
+
+libraryDependencies ++= Seq(
+  "is.cir" %% "ciris-cats",
+  "is.cir" %% "ciris-cats-effect",
+  "is.cir" %% "ciris-core",
+  "is.cir" %% "ciris-enumeratum",
+  "is.cir" %% "ciris-generic",
+  "is.cir" %% "ciris-refined",
+  "is.cir" %% "ciris-spire",
+  "is.cir" %% "ciris-squants"
+).map(_ % versions.ciris)
 
 mainClass in Compile := Some("PromoteMain")
